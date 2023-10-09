@@ -1,0 +1,371 @@
+---
+title: "CITS4009: Computational Data Analysis"
+output:
+  rmdformats::readthedown
+date: "2023-08-28"
+---
+
+# Project 1 - Exploratory Data Analysis
+### Saif Ali Athyaab - 23810756
+
+[YouTube video link](https://youtu.be/NM4qZ8NTCuI)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## Global YouTube 2023 Statistics
+
+The YouTube Global Statistics dataset is one of the latest YouTube datasets comprising over various variables and spanning 995 observations. It offers the consumer a view of metrics such as upload frequency, earnings and other development indicators.
+
+To start off, we simply import our data and print the tail(last 6 observations)
+```{r }
+df <- read.csv('youtube_UTF_8.csv',header = TRUE)
+tail(df)
+```
+
+## Initial EDA
+
+Let us examine the structure of our data.
+```{r}
+str(df)
+```
+We have 995 records encompassing 28 variables in total. We can compute the class of each variable.
+
+```{r}
+table(sapply(df,class))
+```
+
+Broadly we have,
+
+* 20 YouTube related variables
+* 6 related to World Development Bank(WDB) Indicators
+* 2 Spatial data
+
+Out of these we categorical variables - category, country, created_month, channel type. We shall convert them to factors during Data Transformation
+
+## Descriptive Statistical Summary
+```{r}
+summary(df)
+```
+A couple of things to observe here:
+
+1. The minimum of **created_year** of a channel is **1970**, which is impossible because YouTube was launched in 2005.
+
+2. Secondly, the maximum percentage(supposedly out of 100) of **Tertiary Education** is **113%**. How can a country have more than 100% of its population enrolled? Is there any indication of having more than one Tertiary degree? PhD perhaps?
+
+
+## Fixing the 1970 record
+
+According to Wikipedia,
+
+> The site launched officially on December 15, 2005, by which time the site was receiving 8 million views a day.
+
+Source: [Wikipedia](https://en.wikipedia.org/wiki/YouTube)
+
+```{r}
+library("dplyr")
+record_1970 <- filter(df,created_year==1970)
+record_1970
+```
+
+Meanwhile we can also double-check for any channels created before 2005.
+```{r}
+filter(df,created_year<2005)
+```
+No problems here.
+
+Now we can see the record properly. As per our understanding let's change the date to 2005 to prevent it from being an Outlier.
+```{r}
+record_1970$created_date <- 15
+record_1970$created_month <- "Dec"
+record_1970$created_year <- 2005
+rows_update(filter(df,created_year==1970),record_1970)[c('rank','Youtuber','created_year')]
+
+```
+## Investigating 113% Tertiary Enrollment
+
+```{r}
+tertiary_113 <- filter(df,df$Gross.tertiary.education.enrollment.... > 100)
+tertiary_113[c('rank','Youtuber','Gross.tertiary.education.enrollment....')]
+```
+
+## Data Cleaning and Transformation
+
+We'll first look into converting our useful character variables into nominal categorical using the below commands
+```{r}
+nominal_vars <- c("category","Country","channel_type","Abbreviation")
+df$category <- factor(df$category)
+df$Country <- factor(df$Country)
+df$channel_type <- factor(df$channel_type)
+df$Abbreviation <- factor(df$Abbreviation)
+str(df[nominal_vars])
+```
+
+Next, we'll examine the erroneous values. According to my preliminary analysis of looking at the df in a a table format we have 3 types of values:
+
+1. **NA**: In R, NA stands for "not available" and is used to represent missing or undefined values.
+	
+2. **NaN**: In R, NaN stands for "not a number," and it's used to represent undefined or nonsensical numeric values.
+	
+3. **nan**: The lowercase nan is not a special symbol in R. Instead its a normal string. We shall deal with this first.
+
+```{r}
+length(which(df[nominal_vars]=="nan"))
+```
+
+We seem to have 320 **nan** values among our nominal variables. Let us mutate them to a new category called "missing".
+
+```{r}
+library(forcats)
+for (var in nominal_vars) {
+  df[[var]] <- fct_recode(df[[var]], missing = "nan")
+}
+length(which(df[nominal_vars]=="missing"))
+
+```
+```{r}
+length(which(df[nominal_vars]=="missing"))
+
+```
+So now all our **nan** s are converted to **missing**.
+
+Let us now create a Combined Date Column for future time-series.
+```{r}
+df$combined_date <- as.Date(paste(df$created_year, df$created_month, df$created_date, sep = "-"), format = "%Y-%b-%d")
+
+```
+
+Let us analyse the missing values column-wise
+```{r}
+count_missing <- function(df) {
+sapply(df, FUN = function(col) sum(is.na(col)) )
+}
+nacounts <- count_missing(df)
+hasNA = which(nacounts > 0)
+nacounts[hasNA]
+```
+Let us visualise the same
+```{r}
+library(ggplot2)
+# Function to count invalid values in a column
+count_invalid <- function(column) {
+  sum(column %in% c("nan", NA, NaN), na.rm = TRUE)
+}
+
+# Calculate the count of invalid values for each column
+invalid_counts <- sapply(df, count_invalid)
+
+# Create a dataframe to hold the counts and column names
+invalid_df <- data.frame(Column = names(invalid_counts), Count = invalid_counts)
+
+invalid_df_filtered <- invalid_df %>%
+  filter(Count > 0)
+
+# Create a horizontal bar chart sorted in descending order
+ggplot(invalid_df_filtered, aes(x = reorder(Column, Count), y = Count)) +
+  geom_bar(stat = "identity") +
+  geom_label(data = filter(invalid_df_filtered, Column == "Population"), aes(label = "Equal invalids among 6 WDB variables"), hjust=-0.10) +
+
+  labs(title = "Visualisation of Invalid Value count across Dataframe", x = "Columns", y = "Invalid Count") +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1)) +
+  coord_flip()
+
+```
+
+Let us have a look at our Date columns. There seem to be 5 values which are having NaN.
+```{r}
+which(is.na(df['created_year'])) == which(is.na(df['created_date']))
+missing_dates <- which(is.na(df['created_date']))
+missing_dates
+df$created_month[missing_dates]
+```
+We are performing 3 tasks here:
+
+1. checking whether the 5 missing values in date and year are of the same indices
+2. storing those indices in a variable list
+3. retrieving the values from month for those indices
+
+Now let's examine our entire data-frame for these indices and see what's going on
+```{r}
+df[missing_dates,]
+```
+## Data Imputation 
+Now, we compute the values for the 6 variables using other 7 numerical variables. We are employinng Linear regression here which comes from the complete (non-NA) numerical columns
+```{r}
+library(dplyr)
+# Create a function for imputation using linear regression
+impute_with_regression <- function(df, target_cols, predictor_cols) {
+  imputed_df <- df
+  
+  for (target_col in target_cols) {
+    model_formula <- as.formula(paste(target_col, "~", paste(predictor_cols, collapse = "+")))
+    model <- lm(model_formula, data = df)
+    
+    # Subset rows with missing values in the target column
+    missing_rows <- is.nan(df[[target_col]])
+    missing_data <- df[missing_rows, ]
+    
+    # Predict missing values
+    predicted_values <- predict(model, newdata = missing_data)
+    
+    # Fill in missing values in the target column
+    imputed_df[missing_rows, target_col] <- predicted_values
+  }
+  
+  return(imputed_df)
+}
+
+# Specify target and predictor columns
+target_columns <- c("Gross.tertiary.education.enrollment....","Unemployment.rate","Urban_population","Population","Latitude","Longitude")
+predictor_columns <- c("subscribers","video.views","uploads","lowest_monthly_earnings","highest_monthly_earnings","lowest_yearly_earnings","highest_yearly_earnings")
+
+# Impute missing values using linear regression for all target columns
+df <- impute_with_regression(df, target_columns, predictor_columns)
+
+
+```
+
+We can see below that now the 6 variables have no missing values
+```{r}
+nacounts <- count_missing(df)
+hasNA = which(nacounts > 0)
+nacounts[hasNA]
+```
+## Data Visualisation
+
+There can be various reasons to visualise the data. The primary reason is to present the data in a visual manner for the ordinary, non-technical audience and convey our insights.
+
+There can be various Key Performance Indicators (KPIs) for any Data Analysis.We shall be first looking at **YouTuber earnings**.
+
+
+## YouTuber Earnings
+
+We shall start off my doing some more calculations and plotting a graph. Below, we are creating a tibble storing:
+
+1. Average Subscribers Per Population
+2. Number of Subscribers
+3. Average Monthly Earnings
+```{r}
+df%>%
+  group_by(category)%>%
+  summarise(avg.subs.per.population = mean(subscribers,na.rm = T)/(mean(Population,na.rm = T)),
+            avg.yr.earnings = mean(highest_yearly_earnings)) -> subs.stats
+  subs.stats
+```
+
+We shall now utilise this tibble to generate a scatter-plot.
+```{r, echo=FALSE}
+subs.stats%>%
+  ggplot(aes(x = avg.subs.per.population,y = fct_reorder(category, avg.subs.per.population)))+
+  labs(x="Average Subscribers Per Population",y="Category")+
+  geom_point(aes(size = avg.yr.earnings, color =avg.yr.earnings),show.legend = F)+
+  ggtitle('Category-Wise HIGHEST Yearly Earnings')->p2
+
+p2
+
+```
+Seems like the category "Shows" is the highest-grossing and Lucrative for YouTubers.
+```{r}
+shows_df <- df %>%
+  filter(category=='Shows')
+ggplot(shows_df) + geom_bar(aes(x=Country),alpha=0.6,position="identity")
+```
+Although, there are not many records, it goes on to show that creating content for **India** and the **US** is most lucrative.
+```{r}
+# Calculate the average highest_monthly_earnings by category and country
+avg_earnings <- shows_df %>%
+  group_by(category, Country) %>%
+  summarise(avg_highest_yearly_earnings = mean(highest_yearly_earnings, na.rm = TRUE))
+
+ggplot(avg_earnings, aes(x = category, y = avg_highest_yearly_earnings, fill = Country)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Average Highest Monthly Earnings by Category and Country",
+    x = "Category",
+    y = "Average Highest Monthly Earnings",
+    fill = "Country"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  scale_fill_brewer(palette = "Set1")
+```
+
+To see what to look into next, let us do it in an automated manner. Using pairs
+
+## Pairs
+
+```{r}
+library("GGally")
+num_cols <- select_if(df, is.numeric)
+pairs(~subscribers+video.views+uploads+Population+Unemployment.rate+Urban_population,data=num_cols)
+```
+The important correlations here seem:
+
+1. subscribers and views
+2. population and urban population
+3. Population and unemployment rate
+
+```{r,warning=FALSE}
+ggplot(data = df,
+mapping = aes(x = subscribers, y = video.views)) +
+  xlim(min(df$subscribers),7.5e+7)+
+  ylim(min(df$video.views),5.0e+10)+
+geom_point() + geom_smooth()
+```
+The scatter-plot above displays a "fanning" behavior as termed in statistics.The subscribers tend to favour the number of video views mostly for High number of subscribers.
+
+Now let us plot histograms with a normal and log scale to understand about **Uploads**.
+```{r, warning=FALSE}
+library(gridExtra)
+h1 <- ggplot(data = df, mapping = aes(x = uploads))+
+  geom_histogram(aes(y=..density..), bins=35, fill = "grey")+
+  geom_density(color='indianred') +
+  scale_x_continuous(trans='log10')+
+  ggtitle("Uploads (Log Scale)")
+h2 <- ggplot(data = df, 
+      mapping = aes(x = uploads))+
+  geom_histogram(aes(y=..density..), bins = 150, fill = "grey")+
+  geom_density(color='indianred') +
+  #scale_x_continuous(limits=c(0, 0.5e+04))+
+  #annotate("text", x = 1000, y = 0.0015, label = "Spikes at discrete values\n $1K, $1.5K, etc") +
+  ggtitle("Uploads Amount (Up to $5K)")
+grid.arrange(h2, h1, ncol=1)
+```
+The histograms are good indicators of spread of the data. In our case, we can identify that
+
+* Uploads are mostly around 500 - 1000 for most videos.
+
+The insight here is one needs to record and upload atleast 500 videos to becom eone of the distinguished YouTubers
+
+
+
+## Map chart
+```{r}
+library(maps)
+library(ggplot2)
+
+# Assuming you have your data loaded in a dataframe called "df"
+w <- map_data("world")
+# Merge map data with your subscribers data by country name
+w_merged <- merge(w, df, by.x = "region", by.y = "Country", all.x = TRUE)
+
+# Create a ggplot object
+m1 <- ggplot(w_merged, aes(long, lat, group = group, fill = video.views)) +
+  geom_polygon()+
+  scale_fill_gradient(low = "yellow", high = "red", name = "video.views") +
+  labs(title = "World Map with Gradient Highlighting by Subscribers")
+
+
+# Display the plot
+print(m1)
+
+```
+
+## References
+
+1.  https://bookdown.org/robinlovelace/geocompr/adv-map.html
+2. https://statisticsglobe.com/r-pairs-plot-example/
+3. https://www.geeksforgeeks.org/how-to-change-axis-scales-in-r-plots/
+4. chat.openai.com

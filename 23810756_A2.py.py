@@ -1,0 +1,123 @@
+"""
+    CITS1401: Project 2 - S1, 2023
+    Student Name: Saif Ali Athyaab
+    Student ID: 23810756
+    
+    This program is written to open, ingest, and pre-process the given file.
+    The useful columns in the files are:
+        1. Name of the country - string
+        2. Population - integer
+        4. Net Change - integer
+        5. Land Area - integer
+        6. Region - string
+    We are interested in finding the following statistics for each country in region:
+        1. The standard error of population
+        2. The cosine similarilty between population and land area
+        3. The percentage of population wrt. region
+        3. The population density of each country wrt. region
+        4. The rank of each country wrt. region
+
+"""
+def getStdErrorAndCos(country, population, land_area, region):
+    region_stats = {}
+    region_data = {}
+
+    for c, p, l, r in zip(country, population, land_area, region):
+        #EDGE-CASE - NULLS/-VE VALUES
+        if not c or not r or p is None or l is None or p <= 0 or l <= 0:
+            continue
+        
+        if r not in region_data:
+            region_data[r] = {'population': [], 'land_area': []}
+
+        region_data[r]['population'].append(p)
+        region_data[r]['land_area'].append(l)
+
+    for r, data in region_data.items():
+        pop_data = data['population']
+        area_data = data['land_area']        
+        
+        #EDGE-CASE - SINGLE RECORD REGION
+        if len(data['population']) < 2:
+            region_stats[r] = [0, 1]
+            continue
+        
+        # Calculate standard error of population
+        pop_mean = sum(pop_data) / len(pop_data)
+        pop_error = ( sum((pop - pop_mean) ** 2 for pop in pop_data)/ (len(pop_data)-1) ) ** 0.5
+        stde= pop_error/ (len(pop_data) ** 0.5)
+        
+        # Calculate cosine similarity between population and land area
+        dot_product = sum(pop * area for pop, area in zip(pop_data, area_data))
+        pop_norm = (sum(pop ** 2 for pop in pop_data)) ** 0.5
+        area_norm = (sum(area ** 2 for area in area_data)) ** 0.5
+        cosine_sim = dot_product / (pop_norm * area_norm)
+
+        region_stats[r] = [round(stde,4), round(cosine_sim,4)]
+
+    return region_stats
+
+def getCountryInfo(country, population, land_area, net_change, region):
+    region_dict = {}
+
+    # Create a dictionary for each region
+    for c, p, l, n, r in zip(country, population, land_area, net_change, region):
+        #EDGE CASE - NULL values, -ve values
+        if not c or not r or p <= 0 or l <= 0:
+            continue
+        
+        if r not in region_dict:
+            region_dict[r] = {}
+
+        region_dict[r][c] = [p, n]
+        
+        if c in region_dict:
+            continue
+
+    # Calculate the information for each country within the region
+    for region, countries in region_dict.items():
+        total_population = sum(p for p, _ in countries.values())
+
+        for ctry, info in countries.items():
+            pop, net = info
+            percentage = round((pop / total_population) * 100,4)
+            density = round(pop / land_area[country.index(ctry)],4)
+
+            info.extend([percentage, density])
+
+    # Sort the countries within each region based on population, density, and then alphabetical order
+    for countries in region_dict.values():
+        countries_sorted = sorted(countries.items(), key=lambda x: (-x[1][0], -x[1][3]))#x[1][0], -x[1][2], x[0]))#-x[1][0], -x[1][3]))
+
+        for idx, (ctry, info) in enumerate(countries_sorted, start=1):
+            info.append(idx)
+
+    return region_dict
+
+#main function where program execution starts and calls other functions for completing the statistical tasks
+def main(csvfile):
+    
+    with open(csvfile, 'r') as country_file:
+        lines = country_file.readlines()
+
+    headers = lines[0].strip().lower().split(',')
+    
+    #EDGE-CASE - HANDLING REORDERING OF COLUMNS 
+    useful_cols=["country","population","net change","land area","regions"]
+    col_idx_dict=dict.fromkeys(useful_cols, -1)
+    for col in headers:
+        if col.lower() in useful_cols:
+            col_idx_dict[col]=headers.index(col)
+    
+    num_cols = len(headers)
+    columns = [[] for _ in range(num_cols)]
+
+    for line in lines[1:]:
+        values = line.strip().split(',')
+        for col_idx, value in enumerate(values):
+            if col_idx in col_idx_dict.values():
+                columns[col_idx].append(value.lower())
+                
+    stde_cos=getStdErrorAndCos(columns[int(col_idx_dict["country"])],list(map(int, columns[int(col_idx_dict["population"])])),list(map(int, columns[int(col_idx_dict["land area"])])),columns[int(col_idx_dict["regions"])])
+    stats=getCountryInfo(columns[col_idx_dict["country"]],list(map(int, columns[col_idx_dict["population"]])),list(map(int, columns[col_idx_dict["land area"]])),list(map(int, columns[col_idx_dict["net change"]])),columns[col_idx_dict["regions"]])
+    return stde_cos, stats
