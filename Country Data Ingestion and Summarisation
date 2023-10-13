@@ -1,7 +1,4 @@
 """
-    CITS1401: Project 1 - S1, 2023
-    Student Name: Saif Ali Athyaab
-    Student ID: 23810756
     
     This program is written to open, ingest, and pre-process the given file.
     The files are restricted to country information containing 6 columns:
